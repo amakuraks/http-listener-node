@@ -1,6 +1,7 @@
 import express from 'express';
 import path from 'node:path';
 import { config } from './config.ts';
+import { prisma } from './db.ts';
 import listenRoutes from './routes/listen.ts';
 import requestsRoutes from './routes/requests.ts';
 import { errorHandler } from './middleware/errorHandler.ts';
@@ -45,5 +46,21 @@ const server = app.listen(config.port, config.host, () => {
     console.warn('    Captured Authorization headers are readable by anyone on this network.');
   }
 });
+
+/**
+ * Close the listener and hang up the database pool on shutdown. Without this, every
+ * restart under `npm run dev --watch` leaks a connection, and the pool limit is 5.
+ */
+function shutdown(signal: string): void {
+  console.log(`\n${signal} received, shutting down.`);
+  server.close(() => {
+    void prisma.$disconnect().then(() => process.exit(0));
+  });
+  // Do not hang forever on a stuck keep-alive connection.
+  setTimeout(() => process.exit(1), 5000).unref();
+}
+
+process.once('SIGINT', () => shutdown('SIGINT'));
+process.once('SIGTERM', () => shutdown('SIGTERM'));
 
 export { app, server };

@@ -127,3 +127,50 @@ test('deletes all records', async () => {
   });
   assert.equal(await prisma.requestLog.count(), 0);
 });
+
+// --- Body display tiers (#R4: previously untestable, which is how #R1 survived) ---
+// .env.testing: BODY_PREVIEW_CHARS=50, BODY_INLINE_MAX=200, MAX_BODY_SIZE=1kb
+
+async function captureAndOpen(body: string | Uint8Array, contentType?: string): Promise<string> {
+  const headers: Record<string, string> = contentType ? { 'content-type': contentType } : {};
+  await fetch(`${base}/listen/tier`, { method: 'POST', headers, body });
+  const record = await prisma.requestLog.findFirstOrThrow({ orderBy: { id: 'desc' } });
+  return (await fetch(`${base}/requests/${record.id}`)).text();
+}
+
+test('tier 1: a short body renders plain with no Show more toggle', async () => {
+  const html = await captureAndOpen('short body');
+  assert.ok(html.includes('short body'));
+  assert.ok(!html.includes('<details>'), 'no toggle expected under the preview limit');
+  assert.ok(!html.includes('too large to display'));
+});
+
+test('tier 2: a medium body collapses the remainder behind Show more', async () => {
+  const html = await captureAndOpen('B'.repeat(120));
+  assert.ok(html.includes('<details>'), 'expected a Show more toggle');
+  assert.ok(html.includes('Show more'));
+  assert.ok(!html.includes('too large to display'));
+});
+
+test('tier 3: an oversized body is NOT sent to the browser at all', async () => {
+  const payload = 'C'.repeat(400); // over BODY_INLINE_MAX (200), under MAX_BODY_SIZE (1kb)
+  const html = await captureAndOpen(payload);
+  assert.ok(html.includes('too large to display'), 'expected the too-large notice');
+  // #R1 regression guard: the cURL block must not re-embed what the page declined to show.
+  assert.ok(!html.includes('C'.repeat(210)), 'body leaked into the page');
+  assert.ok(html.includes('not inlined'), 'cURL block should reference the raw body link');
+});
+
+test('binary body is described, never inlined', async () => {
+  const html = await captureAndOpen(new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0xff, 0xfe]), 'image/png');
+  assert.ok(html.includes('Binary payload'));
+  assert.ok(html.includes('Download raw body'));
+  assert.ok(html.includes('not inlined'), 'cURL block should reference the raw body link');
+});
+
+test('a JSON body is pretty-printed, malformed JSON falls back to raw', async () => {
+  const pretty = await captureAndOpen('{"a":1}', 'application/json');
+  assert.ok(pretty.includes('&#34;a&#34;: 1'), 'expected pretty-printed JSON');
+  const raw = await captureAndOpen('{"a":1', 'application/json');
+  assert.ok(raw.includes('{&#34;a&#34;:1'), 'malformed JSON must still render raw');
+});

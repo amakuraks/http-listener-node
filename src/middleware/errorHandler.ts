@@ -20,8 +20,13 @@ export const errorHandler: ErrorRequestHandler = (err, req, res, _next) => {
     return;
   }
 
-  // Log the real error server-side only.
-  console.error('[error]', err);
+  // Log a summary, not the whole object. Database errors can embed query parameters,
+  // which here means captured Authorization headers and bodies. The database holding
+  // those is classified Confidential; terminal scrollback and CI logs are not.
+  const { name, message, code } = err as BodyParserError & { code?: string };
+  console.error(
+    `[error] ${req.method} ${req.originalUrl} -> ${name}${code ? ` (${code})` : ''}: ${message}`,
+  );
 
   // VERIFIED: Express's built-in handler writes the full stack trace and absolute
   // filesystem paths into the response body. Never echo the error.

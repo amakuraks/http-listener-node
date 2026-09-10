@@ -13,6 +13,18 @@ const LIST_COLUMNS = {
   createdAt: true,
 } as const;
 
+/** Detail metadata - also excludes `body`, which is fetched separately and conditionally. */
+const DETAIL_COLUMNS = {
+  id: true,
+  method: true,
+  url: true,
+  headers: true,
+  query: true,
+  bodyEncoding: true,
+  bodySize: true,
+  createdAt: true,
+} as const;
+
 /**
  * Express 5 types route params as `string | string[]`: path-to-regexp v8 yields an array
  * for repeated params. `:id` is never repeated here, but the type must be handled, and
@@ -49,7 +61,9 @@ export async function show(req: Request, res: Response): Promise<void> {
     return;
   }
 
-  const record = await prisma.requestLog.findUnique({ where: { id } });
+  // Metadata first, WITHOUT body: a body over the inline cap must never be loaded into
+  // memory just to be discarded. body_size exists precisely so this decision is cheap.
+  const record = await prisma.requestLog.findUnique({ where: { id }, select: DETAIL_COLUMNS });
   if (!record) {
     res.status(404).render('not-found');
     return;
@@ -58,14 +72,16 @@ export async function show(req: Request, res: Response): Promise<void> {
   const headers = record.headers as Record<string, string[]>;
   const query = record.query as Record<string, unknown>;
   const encoding = record.bodyEncoding as BodyEncoding;
-  const body = record.body ?? '';
   const isBinary = encoding === 'base64';
   const tooLarge = record.bodySize > config.bodyInlineMax;
+  const inlineable = !isBinary && !tooLarge && record.bodySize > 0;
 
-  // Three-tier rendering. A body over the inline cap is never sent to the browser;
-  // the page links to the raw endpoint instead.
-  const displayBody =
-    isBinary || tooLarge ? '' : (prettyJson(body, headers['content-type']?.[0]) ?? body);
+  // Second query only when the body will actually be rendered.
+  const body = inlineable
+    ? ((await prisma.requestLog.findUnique({ where: { id }, select: { body: true } }))?.body ?? '')
+    : '';
+
+  const displayBody = inlineable ? (prettyJson(body, headers['content-type']?.[0]) ?? body) : '';
   const preview = displayBody.slice(0, config.bodyPreviewChars);
   const rest = displayBody.slice(config.bodyPreviewChars);
 
@@ -84,6 +100,9 @@ export async function show(req: Request, res: Response): Promise<void> {
       headers,
       body,
       bodyEncoding: encoding,
+      // Without this the cURL block would re-embed a body the page just declined to show.
+      bodyOmitted: !inlineable,
+      bodySize: record.bodySize,
       baseUrl: `${req.protocol}://${req.get('host') ?? 'localhost'}`,
     }),
   });

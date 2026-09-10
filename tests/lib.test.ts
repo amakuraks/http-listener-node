@@ -93,3 +93,32 @@ test('toCurl drops headers curl regenerates', () => {
   assert.ok(!command.includes("-H 'content-length:"), 'content-length must be dropped');
   assert.ok(command.includes("-H 'x-keep: yes'"), 'unrelated headers must be kept');
 });
+
+test('toCurl does not inline an omitted body (#R1 regression guard)', () => {
+  const secret = 'Z'.repeat(5000);
+  const command = toCurl({
+    method: 'POST',
+    url: '/listen',
+    headers: {},
+    body: secret,
+    bodyEncoding: 'utf8',
+    bodyOmitted: true,
+    bodySize: secret.length,
+    baseUrl: 'http://localhost:3000',
+  });
+  assert.ok(!command.includes('ZZZ'), 'an omitted body must never be inlined');
+  assert.ok(command.includes('@body.bin'));
+  assert.ok(command.includes('4.9 KB'), 'placeholder should state the size');
+});
+
+test('toCurl inlines a normal body', () => {
+  const command = toCurl({
+    method: 'POST',
+    url: '/listen',
+    headers: {},
+    body: '{"a":1}',
+    bodyEncoding: 'utf8',
+    baseUrl: 'http://localhost:3000',
+  });
+  assert.ok(command.includes(`--data-binary '{"a":1}'`));
+});
