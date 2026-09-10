@@ -10,10 +10,11 @@
     "dev": "node --env-file=.env --watch src/server.ts",
     "start": "node --env-file=.env src/server.ts",
     "typecheck": "tsc --noEmit",
-    "test": "node --env-file=.env.testing --test tests/**/*.test.ts",
+    "test": "node --env-file=.env.testing --test --test-concurrency=1 tests/**/*.test.ts",
     "prisma:generate": "prisma generate",
     "migrate": "prisma migrate dev",
-    "migrate:deploy": "prisma migrate deploy"
+    "migrate:deploy": "prisma migrate deploy",
+    "migrate:test": "node scripts/prisma-test.mjs migrate deploy"
   },
   "dependencies": {
     "@prisma/adapter-mariadb": "7.10.0",

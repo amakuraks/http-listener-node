@@ -1,10 +1,13 @@
 import { defineConfig } from 'prisma/config';
 
 // Prisma 7 does NOT auto-load .env (Prisma 6 did). Node built-in, no dotenv dependency.
+// PRISMA_ENV_FILE lets `npm run migrate:test` target the test database without editing
+// .env by hand, which the plan flagged as an awkward manual step.
+const envFile = process.env.PRISMA_ENV_FILE ?? '.env';
 try {
-  process.loadEnvFile('.env');
+  process.loadEnvFile(envFile);
 } catch {
-  // No .env — fall back to real environment variables (CI, containers).
+  // No env file — fall back to real environment variables (CI, containers).
 }
 
 const {
