@@ -1,0 +1,45 @@
+<%- include('partials/head', { title: 'Captured Requests' }) %>
+
+<div class="list-header">
+  <h1>Captured Requests <span class="muted">(<%= total %>)</span></h1>
+  <% if (total > 0) { %>
+    <form method="POST" action="/requests" data-confirm="Delete ALL captured requests?">
+      <input type="hidden" name="_method" value="DELETE">
+      <button type="submit" class="danger">Clear All</button>
+    </form>
+  <% } %>
+</div>
+
+<% if (items.length === 0) { %>
+  <p class="empty">No requests captured yet. Send one to <code>/listen</code>.</p>
+<% } else { %>
+  <table>
+    <thead>
+      <tr><th>Time</th><th>Method</th><th>URL</th><th>Size</th><th></th></tr>
+    </thead>
+    <tbody>
+      <% items.forEach(function (item) { %>
+        <tr>
+          <td class="muted"><%= item.createdAt.toISOString().replace('T', ' ').slice(0, 19) %></td>
+          <td><span class="method method-<%= item.method.toLowerCase() %>"><%= item.method %></span></td>
+          <td class="url"><a href="/requests/<%= item.id %>" title="<%= item.url %>"><%= item.url %></a></td>
+          <td class="muted"><%= formatBytes(item.bodySize) %></td>
+          <td>
+            <form method="POST" action="/requests/<%= item.id %>">
+              <input type="hidden" name="_method" value="DELETE">
+              <button type="submit" class="link-danger">Delete</button>
+            </form>
+          </td>
+        </tr>
+      <% }); %>
+    </tbody>
+  </table>
+
+  <nav class="pagination">
+    <% if (page > 1) { %><a href="/requests?page=<%= page - 1 %>">&lsaquo; Previous</a><% } %>
+    <span class="muted">Page <%= page %> of <%= totalPages %></span>
+    <% if (page < totalPages) { %><a href="/requests?page=<%= page + 1 %>">Next &rsaquo;</a><% } %>
+  </nav>
+<% } %>
+
+<%- include('partials/foot') %>
