@@ -1,0 +1,22 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "mysql"
+}
+
+model RequestLog {
+  id           Int      @id @default(autoincrement())
+  method       String   @db.VarChar(16)
+  url          String   @db.Text
+  headers      Json
+  query        Json
+  body         String?  @db.LongText
+  bodyEncoding String   @default("utf8") @map("body_encoding") @db.VarChar(8)
+  bodySize     Int      @default(0)      @map("body_size")
+  createdAt    DateTime @default(now())  @map("created_at")
+
+  @@map("requests")
+}
