@@ -1,0 +1,53 @@
+<%- include('partials/head', { title: record.method + ' ' + record.url }) %>
+
+<p><a href="/requests">&lsaquo; Back to list</a></p>
+
+<h1><span class="method method-<%= record.method.toLowerCase() %>"><%= record.method %></span>
+    <span class="url-full"><%= record.url %></span></h1>
+<p class="muted"><%= record.createdAt.toISOString().replace('T', ' ').slice(0, 19) %></p>
+
+<h2>Headers</h2>
+<table class="kv">
+  <% Object.entries(headers).forEach(function (entry) { %>
+    <% entry[1].forEach(function (value) { %>
+      <tr><th><%= entry[0] %></th><td><%= value %></td></tr>
+    <% }); %>
+  <% }); %>
+</table>
+
+<h2>Query Parameters</h2>
+<% if (Object.keys(query).length === 0) { %>
+  <p class="muted">None</p>
+<% } else { %>
+  <table class="kv">
+    <% Object.entries(query).forEach(function (entry) { %>
+      <tr><th><%= entry[0] %></th><td><%= String(entry[1]) %></td></tr>
+    <% }); %>
+  </table>
+<% } %>
+
+<h2>Body <span class="muted"><%= sizeLabel %></span></h2>
+<% if (record.bodySize === 0) { %>
+  <p class="muted">Empty</p>
+<% } else if (isBinary) { %>
+  <p class="notice">Binary payload (not valid UTF-8). Stored losslessly as base64.</p>
+  <p><a href="/requests/<%= record.id %>/body">Download raw body</a></p>
+<% } else if (tooLarge) { %>
+  <p class="notice">Body is <%= sizeLabel %> &mdash; too large to display inline.</p>
+  <p><a href="/requests/<%= record.id %>/body">View raw body</a></p>
+<% } else { %>
+  <pre class="body"><%= preview %></pre>
+  <% if (rest.length > 0) { %>
+    <details>
+      <summary>Show more (<%= sizeLabel %> total)</summary>
+      <pre class="body"><%= rest %></pre>
+    </details>
+  <% } %>
+  <p><a href="/requests/<%= record.id %>/body">View raw</a></p>
+<% } %>
+
+<h2>Copy as cURL</h2>
+<pre class="curl" id="curl"><%= curl %></pre>
+<button type="button" data-copy-target="curl">Copy</button>
+
+<%- include('partials/foot') %>

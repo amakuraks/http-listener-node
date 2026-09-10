@@ -2,9 +2,15 @@
 
 ## Spec-Driven Development (SDD)
 
-**Version:** 1.0
+**Version:** 1.1
 **Status:** MVP
 **Implementation:** Laravel / Node.js
+
+> **Changelog — v1.1 (2026-09-10).** Eight amendments arising from the Node.js
+> implementation. Two were defects that prevented the reference code from running at all;
+> the rest close gaps found during security review. Amended sections are marked
+> **[v1.1]**. See `docs/plans/2026-09-10-http-listener-mvp-plan.md` for the evidence
+> behind each.
 
 ---
 
@@ -63,6 +69,37 @@ The following are explicitly excluded from the MVP:
 * Automatic deletion
 * Complex request filtering
 * Webhook retry simulation
+
+## 2.3 Deployment Constraint **[v1.1]**
+
+> **Amendment 8.** Excluding authentication (§2.2) is a reasonable MVP decision, but it was
+> stated without the constraint it implies. §4 mandates storing headers **unmasked**, so the
+> `requests` table accumulates bearer tokens, API keys and session cookies in cleartext. An
+> unauthenticated dashboard over that data is a credential store open to anyone who can
+> reach it.
+>
+> A default web server binding listens on **every network interface**, which on any shared
+> network publishes those credentials to every device on it.
+
+Because the MVP has no authentication, the following are **requirements, not
+recommendations**:
+
+1. The service shall bind to **loopback (`127.0.0.1`) by default**. Binding to all
+   interfaces shall require explicit configuration and shall emit a warning.
+2. The service shall not be exposed beyond the local machine or a trusted internal network
+   **unless authentication and transport encryption are added first**. Those are then
+   prerequisites, not enhancements.
+3. The `requests` table shall be classified **Confidential**, and inherits the highest
+   classification of any system tested against it.
+4. Operators should prefer test or sandbox credentials over production credentials when
+   exercising the listener.
+
+### Retention
+
+§15.2 mandates no automatic retention, so captured credentials persist **indefinitely**.
+This is deliberate, but it makes manual purging the entire retention policy: operators shall
+clear captured requests at the end of each test cycle, and should avoid routing live personal
+data through the listener.
 
 ---
 
@@ -189,7 +226,7 @@ Stored record:
 
 Only one application table is required for the MVP.
 
-## 5.1 `requests`
+## 5.1 `requests` **[v1.1]**
 
 ```text
 requests
@@ -200,22 +237,47 @@ url
 headers
 query
 body
+body_encoding      [v1.1]
+body_size          [v1.1]
 created_at
 updated_at
 ```
 
 Recommended types:
 
-| Column       | Type            |
-| ------------ | --------------- |
-| `id`         | BIGINT / UUID   |
-| `method`     | VARCHAR         |
-| `url`        | TEXT            |
-| `headers`    | JSON            |
-| `query`      | JSON            |
-| `body`       | TEXT / LONGTEXT |
-| `created_at` | TIMESTAMP       |
-| `updated_at` | TIMESTAMP       |
+| Column          | Type            | Notes |
+| --------------- | --------------- | ----- |
+| `id`            | INT / BIGINT / UUID | See amendment 4 below |
+| `method`        | VARCHAR         | |
+| `url`           | TEXT            | |
+| `headers`       | JSON            | Array-valued per §4.1 |
+| `query`         | JSON            | |
+| `body`          | LONGTEXT        | `TEXT` caps at 64KB — too small |
+| `body_encoding` | VARCHAR         | `utf8` or `base64` **[v1.1]** |
+| `body_size`     | INT             | Raw byte count **[v1.1]** |
+| `created_at`    | TIMESTAMP       | |
+| `updated_at`    | TIMESTAMP       | Optional; records are append-only |
+
+> **Amendment 3 — two new columns.**
+>
+> **`body_encoding`** exists because a naive `toString('utf8')` replaces invalid byte
+> sequences with U+FFFD *irreversibly*. A captured PNG, gzip or protobuf payload would be
+> silently corrupted. Implementations shall round-trip the bytes through UTF-8 and store
+> `utf8` when they survive unchanged, `base64` otherwise. §2.2 does not exclude binary
+> payloads, so losing them is a defect rather than a scope decision.
+>
+> **`body_size`** stores the raw byte count so the request list can display a size without
+> loading the body. Without it, rendering one page of 20 records would pull up to 20 large
+> bodies into memory purely to measure them. The list query shall not select `body`.
+
+> **Amendment 4 — `id` type.** BIGINT is problematic in JavaScript implementations: it maps
+> to the `BigInt` type, and **`JSON.stringify` throws on `BigInt`**, so returning a record
+> as JSON fails at runtime. Use `INT` (~2.1 billion rows, far beyond a development tool's
+> needs) or serialise `BigInt` explicitly. The Node.js implementation uses `INT`.
+
+> **Charset.** The table shall use `utf8mb4`. This is a security control, not a preference:
+> the MariaDB/MySQL client library carries an unfixed SQL-injection advisory reachable only
+> under `big5`, `gbk`, `sjis`, `cp932` or `gb18030` client charsets.
 
 `updated_at` is optional if request records are never updated after creation.
 
@@ -464,16 +526,46 @@ body
 timestamp
 ```
 
-## 12.2 Conceptual Express Implementation
+## 12.2 Conceptual Express Implementation **[v1.1]**
+
+> **Amendment 1 — routing.** The previous text specified:
+>
+> ```javascript
+> app.all('/listen', captureRequest);
+> app.all('/listen/*', captureRequest);   // Express 4 syntax
+> ```
+>
+> This **throws at startup** on Express 5, which is what `npm install express` now
+> installs. Express 5 upgraded to `path-to-regexp` v8, which removed unnamed wildcards:
+>
+> ```
+> Missing parameter name at index 9: /listen/*
+> ```
+>
+> Wildcards must be named. A single route with an optional segment replaces both lines.
 
 ```javascript
-app.all('/listen', captureRequest);
-app.all('/listen/*', captureRequest);
+app.all('/listen{/*splat}', express.raw({ type: '*/*', limit: MAX_BODY_SIZE }), captureRequest);
 ```
+
+Verified to match `/listen`, `/listen/report/1?debug=true` and `/listen/a/b/c/d`.
+
+> **Amendment 2 — body capture.** The previous handler read `req.body`, which implies a
+> parsing body parser such as `express.json()`. That is incorrect for this product for
+> three reasons:
+>
+> | Problem | Consequence |
+> |---|---|
+> | `express.json()` rejects malformed JSON with **HTTP 400** before the handler runs | The tool cannot capture broken payloads — the single most common reason to reach for it |
+> | It *parses* the body | Destroys the raw fidelity required by §4 and §11.2 |
+> | It defaults to a **100kb** limit | Contradicts §15.3 |
+>
+> Use `express.raw({ type: '*/*' })`, which yields a `Buffer` for every content type and
+> parses nothing.
 
 The handler shall:
 
-1. Read the incoming request.
+1. Read the raw request bytes.
 2. Capture all required request information.
 3. Create a database record.
 4. Return HTTP 200.
@@ -482,22 +574,38 @@ Conceptually:
 
 ```javascript
 async function captureRequest(req, res) {
-    await Request.create({
-        method: req.method,
-        url: req.originalUrl,
-        headers: req.headers,
-        query: req.query,
-        body: req.body,
-        created_at: new Date()
-    });
+    // express.raw leaves req.body as {} (NOT an empty Buffer) on a bodyless
+    // request such as GET or DELETE. Without this guard, .toString() throws.
+    const buf = Buffer.isBuffer(req.body) ? req.body : Buffer.alloc(0);
 
-    res.status(200).json({
-        status: 'OK'
-    });
+    try {
+        await Request.create({
+            method: req.method,
+            url: req.originalUrl,
+            headers: normalizeHeaders(req.headers),  // see §4.1 note below
+            query: req.query,
+            ...encodeBody(buf),                      // see §5 body_encoding
+            created_at: new Date()
+        });
+        res.status(200).json({ status: 'OK' });
+    } catch (error) {
+        res.status(500).json({ status: 'ERROR' });   // §16: never 200 on failure
+    }
 }
 ```
 
-The actual implementation must ensure that the body is captured correctly for different content types.
+### Header shape
+
+Node returns header values as flat strings; §4.1 and the Laravel implementation use arrays.
+To keep the two implementations contract-compatible per §12, Node implementations shall
+normalise:
+
+```javascript
+// { 'content-type': 'application/json' }  ->  { 'content-type': ['application/json'] }
+```
+
+The actual implementation must ensure that the body is captured correctly for different
+content types, including payloads that are not valid UTF-8.
 
 ---
 
@@ -521,6 +629,35 @@ The implementation shall not introduce additional application tables unless requ
 # 14. UI Specification
 
 The MVP requires only two primary screens.
+
+## 14.0 Output Encoding **[v1.1]**
+
+> **Amendment 7 — the dashboard renders attacker-controlled data.** This follows directly
+> from Listen → Show but was never stated. Every value on these screens — URL, header names
+> and values, query parameters, body — was supplied by an external system through an
+> endpoint that accepts arbitrary input by design.
+>
+> A request carrying `<script>alert(1)</script>` in a header renders that script into the
+> detail page. That is textbook **stored cross-site scripting**, arriving through the one
+> endpoint whose entire purpose is accepting anything.
+
+Implementations shall:
+
+1. **Escape every captured value on output.** Use the templating engine's escaping form
+   (Blade `{{ }}`, EJS `<%= %>`) and never the raw form (`{!! !!}`, `<%- %>`) on captured
+   data. The raw form is permitted only for template includes.
+2. **Send a Content-Security-Policy** as defence in depth, at minimum
+   `default-src 'self'; script-src 'self'` with no `unsafe-inline`. This requires that the
+   UI carry no inline `onclick`/`onsubmit` handlers — behaviour belongs in a served script
+   file.
+3. **Serve raw body responses as `text/plain` with `X-Content-Type-Options: nosniff`**, so a
+   captured payload cannot be sniffed into executable HTML.
+4. **Protect destructive operations against cross-origin invocation.** Cross-origin form
+   POSTs are *not* blocked by browser origin policy, so any page the operator has open could
+   silently trigger "delete all". Binding the service to loopback does **not** prevent this,
+   because the request originates from the operator's own browser. Reject state-changing
+   requests whose `Sec-Fetch-Site` is present and not `same-origin`; treat an absent header
+   as a non-browser caller so command-line use of §10 continues to work.
 
 ## 14.1 Request List
 
@@ -580,11 +717,23 @@ There shall be no automatic retention mechanism.
 
 Request records remain in the database until manually deleted.
 
-## 15.3 Request Size
+## 15.3 Request Size **[v1.1]**
 
-The application shall not implement its own request-body size restriction.
+The application shall not impose an arbitrary request-body size restriction.
 
 Any limits imposed by the web server, reverse proxy, framework, PHP runtime, Node.js runtime, or infrastructure are outside the application-level specification.
+
+> **Amendment 5 — a configurable limit is unavoidable.** The original "no limit" wording is
+> not implementable as written. Body parsers ship with their own default — `express.raw`
+> caps at **100kb** — so an implementation that sets nothing does not get "unlimited", it
+> gets 100kb. The limit must be set explicitly to be raised.
+>
+> A genuinely unbounded body also means unbounded memory per request, which is a
+> denial-of-service vector on a service with no rate limiting (§2.2).
+>
+> Implementations shall therefore expose the limit as configuration (`MAX_BODY_SIZE`,
+> default `50mb`) and document the value. Exceeding it returns **HTTP 413**, not a silent
+> truncation — see §16.
 
 ## 15.4 Performance
 
@@ -628,6 +777,38 @@ HTTP/1.1 500 Internal Server Error
 
 The system shall not return HTTP 200 when it knows that the request was not successfully recorded.
 
+## Payload Too Large **[v1.1]**
+
+> **Amendment 6.** The listener previously defined only 200 and 500, leaving the
+> oversized-body outcome undefined. A body exceeding `MAX_BODY_SIZE` (§15.3) is rejected by
+> the body parser *before* the handler runs, so nothing is recorded — and returning a
+> generic 500 would wrongly suggest a server fault the caller cannot act on.
+
+If the request body exceeds the configured limit:
+
+```http
+HTTP/1.1 413 Payload Too Large
+```
+
+```json
+{
+    "status": "TOO_LARGE"
+}
+```
+
+No record is created. The caller shall be told explicitly rather than left to infer that the
+capture was dropped.
+
+## Error Responses Shall Not Leak Internals **[v1.1]**
+
+> **Amendment 6b.** Express's built-in error handler writes the **full stack trace,
+> including absolute filesystem paths**, into the response body when `NODE_ENV` is not
+> `production`. Verified.
+
+Implementations shall register an error handler that logs the fault server-side and returns
+a generic response. No response shall contain a stack trace, filesystem path, or database
+error text.
+
 ---
 
 # 17. Acceptance Criteria
@@ -641,6 +822,8 @@ The system shall not return HTTP 200 when it knows that the request was not succ
 * [ ] `DELETE /listen/report/1` is accepted.
 * [ ] Arbitrary paths under `/listen` are accepted.
 * [ ] Successfully captured requests return HTTP 200.
+* [ ] **[v1.1]** A malformed payload is captured verbatim, not rejected.
+* [ ] **[v1.1]** A body over `MAX_BODY_SIZE` returns HTTP 413 and records nothing.
 
 ## Record
 
@@ -652,6 +835,8 @@ The system shall not return HTTP 200 when it knows that the request was not succ
 * [ ] Request body is recorded.
 * [ ] Timestamp is recorded.
 * [ ] Multiple requests create separate records.
+* [ ] **[v1.1]** Headers are stored in array form, identically in both implementations.
+* [ ] **[v1.1]** A binary payload round-trips without loss.
 
 ## Show
 
@@ -664,6 +849,16 @@ The system shall not return HTTP 200 when it knows that the request was not succ
 * [ ] Body can be inspected.
 * [ ] Individual records can be deleted.
 * [ ] All records can be deleted.
+* [ ] **[v1.1]** Script tags in captured headers and bodies render escaped, not executed.
+* [ ] **[v1.1]** No response contains a stack trace or filesystem path.
+* [ ] **[v1.1]** The raw body response carries `X-Content-Type-Options: nosniff`.
+
+## Deployment **[v1.1]**
+
+* [ ] The service binds to loopback by default.
+* [ ] Binding to all interfaces requires explicit configuration and warns.
+* [ ] A cross-origin delete request is rejected and destroys no data.
+* [ ] Command-line delete requests continue to work.
 
 ---
 
