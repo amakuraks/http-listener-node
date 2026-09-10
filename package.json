@@ -4,9 +4,30 @@
   "description": "HTTP Listener",
   "license": "ISC",
   "author": "AmakuraKS",
-  "type": "commonjs",
-  "main": "server.js",
+  "type": "module",
+  "main": "src/server.ts",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "dev": "node --env-file=.env --watch src/server.ts",
+    "start": "node --env-file=.env src/server.ts",
+    "typecheck": "tsc --noEmit",
+    "test": "node --env-file=.env.testing --test tests/**/*.test.ts",
+    "prisma:generate": "prisma generate",
+    "migrate": "prisma migrate dev",
+    "migrate:deploy": "prisma migrate deploy"
+  },
+  "dependencies": {
+    "@prisma/adapter-mariadb": "7.10.0",
+    "@prisma/client": "7.10.0",
+    "ejs": "^6.0.1",
+    "express": "^5.2.1",
+    "method-override": "^3.0.0"
+  },
+  "devDependencies": {
+    "@types/ejs": "^3.1.5",
+    "@types/express": "^5.0.6",
+    "@types/method-override": "^3.0.0",
+    "@types/node": "^24.13.4",
+    "prisma": "7.10.0",
+    "typescript": "^7.0.2"
   }
 }
