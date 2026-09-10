@@ -391,13 +391,36 @@ mysql -u root -p -e "SHOW DATABASES LIKE 'request_tester%';"
 
 ### Task 2.4 — Initial migration + client generation
 
+> ⚠️ **`prisma migrate dev` does not work on a least-privilege database user.** It creates a
+> temporary *shadow database* to verify migrations, which requires global `CREATE DATABASE`
+> rights. A user granted privileges on only its own databases gets:
+>
+> ```
+> Error: P3014  Prisma Migrate could not create the shadow database.
+> Original error: P1010  User was denied access on the database `prisma_migrate_shadow_db_...`
+> ```
+>
+> This is not a misconfiguration to fix — a scoped user is the *correct* setup. Use the
+> shadow-free path below. `migrate deploy` never creates a shadow database.
+
+**Creating a migration (shadow-free):**
 ```bash
-npx prisma migrate dev --name init
+TS=$(date +%Y%m%d%H%M%S)
+mkdir -p "prisma/migrations/${TS}_init"
+npx prisma migrate diff --from-empty --to-schema prisma/schema.prisma --script \
+  -o "prisma/migrations/${TS}_init/migration.sql"
+npx prisma migrate deploy
 npx prisma generate
 ```
 
-**Expect:** `prisma/migrations/<timestamp>_init/migration.sql` created, and
-`✔ Generated Prisma Client (7.10.0) to .\src\generated\prisma`.
+> Prisma 7 renamed the diff flags: it is `--to-schema`, not `--to-schema-datamodel`.
+
+**Expect:** `Applying migration ...init`, `All migrations have been successfully applied.`,
+and `✔ Generated Prisma Client (7.10.0) to .\src\generated\prisma`.
+
+**Alternative** if you would rather keep using `migrate dev`: grant the app user rights to a
+dedicated shadow database and set `shadowDatabaseUrl` in `prisma.config.ts`. That needs an
+administrator, so the shadow-free path above is the default.
 
 > The generate step prints a banner recommending an upgrade to **8.0.0-rc.13**.
 > **Ignore it** — that is the release candidate documented above.
