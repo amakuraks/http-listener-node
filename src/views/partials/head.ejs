@@ -4,11 +4,14 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title><%= title %> · Request Tester</title>
+  <!-- Deliberately NOT deferred: must run before first paint to avoid a theme flash. -->
+  <script src="/assets/theme.js"></script>
   <link rel="stylesheet" href="/assets/style.css">
   <script src="/assets/app.js" defer></script>
 </head>
 <body>
 <header class="topbar">
   <a class="brand" href="/requests">Request Tester</a>
+  <button type="button" class="theme-toggle" data-theme-toggle aria-label="Switch theme">☾</button>
 </header>
 <main>

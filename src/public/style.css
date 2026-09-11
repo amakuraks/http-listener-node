@@ -22,10 +22,16 @@
   --delete: #b91c1c;
 }
 
-/* Follows the operating system / browser setting. No toggle, no JavaScript,
-   nothing for the Content-Security-Policy to block. */
+/* Dark palette, applied in two situations:
+     1. The OS asks for dark AND the user has not explicitly chosen light.
+     2. The user explicitly chose dark, whatever the OS says.
+
+   CSS cannot share one declaration block across a media query and a plain
+   selector, so the values appear twice. tests/theme.test.ts asserts the two
+   blocks stay identical - editing one without the other is the obvious way
+   to break this. */
 @media (prefers-color-scheme: dark) {
-  :root {
+  :root:not([data-theme='light']) {
     --fg: #e4e6eb;
     --muted: #9099a8;
     --line: #2b313c;
@@ -47,6 +53,36 @@
   }
 }
 
+:root[data-theme='dark'] {
+  --fg: #e4e6eb;
+  --muted: #9099a8;
+  --line: #2b313c;
+  --bg: #15181d;
+  --accent: #7aa7ff;
+  --surface: #1c2029;
+  --chip: #262c37;
+  --danger: #f87171;
+  --danger-fg: #1a1a1a;
+  --notice-bg: #2b2410;
+  --notice-line: #5f4c14;
+
+  /* Brightened so they stay legible on a dark ground. */
+  --get: #34d399;
+  --post: #7aa7ff;
+  --put: #fbbf24;
+  --patch: #c4b5fd;
+  --delete: #f87171;
+}
+
+/* Pin the native widget scheme to the explicit choice too, so scrollbars and
+   form controls do not disagree with the page. */
+:root[data-theme='dark'] {
+  color-scheme: dark;
+}
+:root[data-theme='light'] {
+  color-scheme: light;
+}
+
 * {
   box-sizing: border-box;
 }
@@ -61,11 +97,29 @@ body {
 .topbar {
   border-bottom: 1px solid var(--line);
   padding: 12px 24px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
 }
 .brand {
   font-weight: 600;
   text-decoration: none;
   color: var(--fg);
+}
+
+.theme-toggle {
+  background: var(--chip);
+  color: var(--fg);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 15px;
+  line-height: 1;
+  padding: 6px 10px;
+}
+.theme-toggle:hover {
+  border-color: var(--muted);
 }
 
 main {
