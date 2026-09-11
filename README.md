@@ -73,6 +73,22 @@ Listener responses: `200 OK` · `413 TOO_LARGE` (over `MAX_BODY_SIZE`) · `500 E
 | `BODY_PREVIEW_CHARS` | `2000` | Shown before "Show more" |
 | `BODY_INLINE_MAX` | `131072` | Above this, body isn't sent to the browser |
 
+## Running with PM2
+
+```bash
+npm install -g pm2
+pm2 start ecosystem.config.cjs
+pm2 logs request-tester
+pm2 stop request-tester
+```
+
+Config lives in [`ecosystem.config.cjs`](ecosystem.config.cjs). Two things worth knowing:
+
+- **`node_args: ['--env-file=.env']` is required.** PM2 doesn't read `.env` itself, so without it the app exits with `Missing required environment variable`. Keep credentials in `.env`, not in an `env:` block — that file is committed.
+- **The file must be `.cjs`.** `package.json` is `"type": "module"` and PM2 loads ecosystem files with `require()`.
+
+On **Windows**, `pm2 startup` is unsupported — use [pm2-installer](https://github.com/jessety/pm2-installer) or a Task Scheduler entry running `pm2 resurrect`. PM2 also hard-terminates processes on Windows, so the graceful shutdown handler only runs on Linux/macOS.
+
 ## Tests
 
 ```bash
