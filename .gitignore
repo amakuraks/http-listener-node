@@ -6,3 +6,6 @@ node_modules/
 
 # Regenerated from prisma/schema.prisma by `npm run prisma:generate`.
 src/generated/
+
+# PM2 logs
+logs/
